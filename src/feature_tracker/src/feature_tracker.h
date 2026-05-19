@@ -7,6 +7,9 @@
 #include <csignal>
 
 #include <opencv2/opencv.hpp>
+
+#include <opencv2/highgui.hpp>
+#include <opencv2/cvconfig.h>
 #include <eigen3/Eigen/Dense>
 
 #include "camodocal/camera_models/CameraFactory.h"

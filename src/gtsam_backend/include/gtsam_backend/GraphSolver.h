@@ -114,6 +114,7 @@ private:
 
   // ******************************* TODO ********************************* //
   bool set_imu_preintegration(const gtsam::State& prior_state);
+  void integrate_imu(double updatetime);
 
   // Function that will compound the GTSAM preintegrator to get discrete preintegration measurement
   gtsam::CombinedImuFactor create_imu_factor(double updatetime, gtsam::Values& values_initial);
@@ -165,7 +166,7 @@ private:
   std::deque<Eigen::Vector4d> imu_orientation;
 
   // Imu Preintegration
-  gtsam::PreintegratedCombinedMeasurements* preint_gtsam;
+  gtsam::PreintegratedCombinedMeasurements* preint_gtsam = nullptr;
 
   /// Lookup tables for features
   std::mutex features_mutex;

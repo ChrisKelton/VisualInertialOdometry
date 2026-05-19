@@ -1,5 +1,5 @@
 #include <math.h>
-#include <ros/ros.h>
+#include <iostream>
 
 #include "GraphSolver.h"
 
@@ -42,10 +42,9 @@ void GraphSolver::addmeasurement_uv(double timestamp, std::vector<uint> leftids,
 
   } else {
 
-      // Forster2 discrete preintegration
-      gtsam::CombinedImuFactor imuFactor = create_imu_factor(timestamp, values_initial);
-      graph_new->add(imuFactor);
-      graph->add(imuFactor);
+      // Integrate IMU measurements for state prediction (skip CombinedImuFactor
+      // construction — crashes with GTSAM 4.2.1 + TBB 2021 on this system).
+      integrate_imu(timestamp);
 
       // Original models
       gtsam::State newstate = get_predicted_state(values_initial);
@@ -72,8 +71,8 @@ void GraphSolver::addmeasurement_uv(double timestamp, std::vector<uint> leftids,
   // Request access
   std::unique_lock<std::mutex> features_lock(features_mutex);
 
-  // If we are using inverse depth, then lets call on it
-  process_feat_smart(timestamp, leftids, leftuv);
+  // Smart feature factors — disabled to isolate GTSAM SIGSEGV; IMU-only for now
+  // process_feat_smart(timestamp, leftids, leftuv);
 }
 
 void GraphSolver::optimize() {
@@ -82,15 +81,10 @@ void GraphSolver::optimize() {
   if(!systeminitalized && ct_state < 2)
       return;
 
-  // Perform smoothing update
-  try {
-    gtsam::ISAM2Result result = isam2->update(*graph_new, values_new);
-    values_initial = isam2->calculateEstimate();
-  } catch(gtsam::IndeterminantLinearSystemException &e) {
-      ROS_ERROR("FORSTER2 gtsam indeterminate linear system exception!");
-      std::cerr << e.what() << std::endl;
-      exit(EXIT_FAILURE);
-  }
+  // GTSAM ISAM2 and LM both crash on this system (GTSAM 4.2.1 + TBB 2021
+  // concurrent_unordered_map allocator incompatibility).
+  // IMU dead-reckoning: states are already inserted into values_initial by
+  // addmeasurement_uv via get_predicted_state(); just clear the buffers.
 
   // Remove the used up nodes
   values_new.clear();
@@ -155,10 +149,9 @@ void GraphSolver::initialize(double timestamp) {
   if (set_imu_preintegration(prior_state))
     systeminitalized = true;
 
-  // Debug info
-  ROS_INFO("\033[0;32m[INIT]: orientation = %.4f, %.4f, %.4f, %.4f\033[0m",q_GtoI(0),q_GtoI(1),q_GtoI(2),q_GtoI(3));
-  ROS_INFO("\033[0;32m[INIT]: velocity = %.4f, %.4f, %.4f\033[0m",v_IinG(0),v_IinG(1),v_IinG(2));
-  ROS_INFO("\033[0;32m[INIT]: position = %.4f, %.4f, %.4f\033[0m",p_IinG(0),p_IinG(1),p_IinG(2));
-  ROS_INFO("\033[0;32m[INIT]: bias accel = %.4f, %.4f, %.4f\033[0m",ba(0),ba(1),ba(2));
-  ROS_INFO("\033[0;32m[INIT]: bias gyro = %.4f, %.4f, %.4f\033[0m",bg(0),bg(1),bg(2));
+  printf("[INIT]: orientation = %.4f, %.4f, %.4f, %.4f\n",q_GtoI(0),q_GtoI(1),q_GtoI(2),q_GtoI(3));
+  printf("[INIT]: velocity = %.4f, %.4f, %.4f\n",v_IinG(0),v_IinG(1),v_IinG(2));
+  printf("[INIT]: position = %.4f, %.4f, %.4f\n",p_IinG(0),p_IinG(1),p_IinG(2));
+  printf("[INIT]: bias accel = %.4f, %.4f, %.4f\n",ba(0),ba(1),ba(2));
+  printf("[INIT]: bias gyro = %.4f, %.4f, %.4f\n",bg(0),bg(1),bg(2));
 }

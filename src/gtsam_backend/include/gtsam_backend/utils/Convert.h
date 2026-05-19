@@ -1,9 +1,9 @@
 #pragma once
 
-#include <geometry_msgs/PoseWithCovariance.h>
+#include <geometry_msgs/msg/pose_with_covariance.hpp>
 #include <gtsam/geometry/Pose3.h>
 
-void ToPose(const gtsam::Pose3& i_pose, geometry_msgs::Pose& pose) {
+void ToPose(const gtsam::Pose3& i_pose, geometry_msgs::msg::Pose& pose) {
   pose.orientation.x = i_pose.rotation().toQuaternion().x();
   pose.orientation.y = i_pose.rotation().toQuaternion().y();
   pose.orientation.z = i_pose.rotation().toQuaternion().z();
@@ -15,7 +15,7 @@ void ToPose(const gtsam::Pose3& i_pose, geometry_msgs::Pose& pose) {
 
 void ToPoseWithCovariance(const gtsam::Pose3& i_pose,
                           const Eigen::Matrix<double, 6, 6>& covariance,
-                          geometry_msgs::PoseWithCovariance& pose) {
+                          geometry_msgs::msg::PoseWithCovariance& pose) {
   ToPose(i_pose, pose.pose);
   
   // Finally set the covariance in the message

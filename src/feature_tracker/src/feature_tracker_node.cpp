@@ -1,11 +1,8 @@
-#include <ros/ros.h>
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/image_encodings.h>
-#include <sensor_msgs/PointCloud.h>
-#include <sensor_msgs/Imu.h>
-#include <std_msgs/Bool.h>
-#include <cv_bridge/cv_bridge.h>
-#include <message_filters/subscriber.h>
+#include "rclcpp/rclcpp.hpp"
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include "feature_tracker.h"
 
@@ -13,10 +10,11 @@
 
 vector<uchar> r_status;
 vector<float> r_err;
-queue<sensor_msgs::ImageConstPtr> img_buf;
+queue<sensor_msgs::msg::Image::ConstSharedPtr> img_buf;
 
-ros::Publisher pub_img,pub_match;
-ros::Publisher pub_restart;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_img;
+rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_match;
+rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_restart;
 
 FeatureTracker trackerData[NUM_OF_CAM];
 double first_image_time;
@@ -25,74 +23,69 @@ bool first_image_flag = true;
 double last_image_time = 0;
 bool init_pub = 0;
 
-void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
+static rclcpp::Node::SharedPtr g_node;
+
+void img_callback(const sensor_msgs::msg::Image::ConstSharedPtr img_msg)
 {
+    double stamp_sec = rclcpp::Time(img_msg->header.stamp).seconds();
+
     if(first_image_flag)
     {
         first_image_flag = false;
-        first_image_time = img_msg->header.stamp.toSec();
-        last_image_time = img_msg->header.stamp.toSec();
+        first_image_time = stamp_sec;
+        last_image_time = stamp_sec;
         return;
     }
     // detect unstable camera stream
-    if (img_msg->header.stamp.toSec() - last_image_time > 1.0 || img_msg->header.stamp.toSec() < last_image_time)
+    if (stamp_sec - last_image_time > 1.0 || stamp_sec < last_image_time)
     {
-        ROS_WARN("image discontinue! reset the feature tracker!");
-        first_image_flag = true; 
+        RCLCPP_WARN(g_node->get_logger(), "image discontinue! reset the feature tracker!");
+        first_image_flag = true;
         last_image_time = 0;
         pub_count = 1;
-        std_msgs::Bool restart_flag;
+        std_msgs::msg::Bool restart_flag;
         restart_flag.data = true;
-        pub_restart.publish(restart_flag);
+        pub_restart->publish(restart_flag);
         return;
     }
-    last_image_time = img_msg->header.stamp.toSec();
+    last_image_time = stamp_sec;
     // frequency control
-    if (round(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time)) <= FREQ)
+    if (round(1.0 * pub_count / (stamp_sec - first_image_time)) <= FREQ)
     {
         PUB_THIS_FRAME = true;
         // reset the frequency control
-        if (abs(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time) - FREQ) < 0.01 * FREQ)
+        if (abs(1.0 * pub_count / (stamp_sec - first_image_time) - FREQ) < 0.01 * FREQ)
         {
-            first_image_time = img_msg->header.stamp.toSec();
+            first_image_time = stamp_sec;
             pub_count = 0;
         }
     }
     else
         PUB_THIS_FRAME = false;
 
-    cv_bridge::CvImageConstPtr ptr;
-    if (img_msg->encoding == "8UC1")
-    {
-        sensor_msgs::Image img;
-        img.header = img_msg->header;
-        img.height = img_msg->height;
-        img.width = img_msg->width;
-        img.is_bigendian = img_msg->is_bigendian;
-        img.step = img_msg->step;
-        img.data = img_msg->data;
-        img.encoding = "mono8";
-        ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO8);
-    }
-    else
-        ptr = cv_bridge::toCvCopy(img_msg, sensor_msgs::image_encodings::MONO8);
+    // Convert ROS image to cv::Mat without cv_bridge to avoid OpenCV version ABI mismatch.
+    // Both mono8 and 8UC1 are single-channel uint8 — wrap the raw data directly.
+    cv::Mat gray_img(img_msg->height, img_msg->width, CV_8UC1,
+                     const_cast<uint8_t*>(img_msg->data.data()),
+                     img_msg->step);
+    // Clone so we own the data independent of the message lifetime.
+    cv::Mat tracked_img = gray_img.clone();
 
-    cv::Mat show_img = ptr->image;
+    cv::Mat show_img = tracked_img;
     TicToc t_r;
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
-        ROS_DEBUG("processing camera %d", i);
         if (i != 1 || !STEREO_TRACK)
-            trackerData[i].readImage(ptr->image.rowRange(ROW * i, ROW * (i + 1)), img_msg->header.stamp.toSec());
+            trackerData[i].readImage(tracked_img.rowRange(ROW * i, ROW * (i + 1)), stamp_sec);
         else
         {
             if (EQUALIZE)
             {
                 cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
-                clahe->apply(ptr->image.rowRange(ROW * i, ROW * (i + 1)), trackerData[i].cur_img);
+                clahe->apply(tracked_img.rowRange(ROW * i, ROW * (i + 1)), trackerData[i].cur_img);
             }
             else
-                trackerData[i].cur_img = ptr->image.rowRange(ROW * i, ROW * (i + 1));
+                trackerData[i].cur_img = tracked_img.rowRange(ROW * i, ROW * (i + 1));
         }
 
 #if SHOW_UNDISTORTION
@@ -113,12 +106,12 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
    if (PUB_THIS_FRAME)
    {
         pub_count++;
-        sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);
-        sensor_msgs::ChannelFloat32 id_of_point;
-        sensor_msgs::ChannelFloat32 u_of_point;
-        sensor_msgs::ChannelFloat32 v_of_point;
-        sensor_msgs::ChannelFloat32 velocity_x_of_point;
-        sensor_msgs::ChannelFloat32 velocity_y_of_point;
+        sensor_msgs::msg::PointCloud::SharedPtr feature_points(new sensor_msgs::msg::PointCloud);
+        sensor_msgs::msg::ChannelFloat32 id_of_point;
+        sensor_msgs::msg::ChannelFloat32 u_of_point;
+        sensor_msgs::msg::ChannelFloat32 v_of_point;
+        sensor_msgs::msg::ChannelFloat32 velocity_x_of_point;
+        sensor_msgs::msg::ChannelFloat32 velocity_y_of_point;
 
         feature_points->header = img_msg->header;
         feature_points->header.frame_id = "world";
@@ -136,7 +129,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
                 {
                     int p_id = ids[j];
                     hash_ids[i].insert(p_id);
-                    geometry_msgs::Point32 p;
+                    geometry_msgs::msg::Point32 p;
                     p.x = un_pts[j].x;
                     p.y = un_pts[j].y;
                     p.z = 1;
@@ -155,60 +148,54 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         feature_points->channels.push_back(v_of_point);
         feature_points->channels.push_back(velocity_x_of_point);
         feature_points->channels.push_back(velocity_y_of_point);
-        ROS_DEBUG("publish %f, at %f", feature_points->header.stamp.toSec(), ros::Time::now().toSec());
-        // skip the first image; since no optical speed on frist image
+        // skip the first image; since no optical speed on first image
         if (!init_pub)
         {
             init_pub = 1;
         }
         else
-            pub_img.publish(feature_points);
+            pub_img->publish(*feature_points);
 
+        static bool first_img_published = false;
         if (SHOW_TRACK)
         {
-            ptr = cv_bridge::cvtColor(ptr, sensor_msgs::image_encodings::BGR8);
-            //cv::Mat stereo_img(ROW * NUM_OF_CAM, COL, CV_8UC3);
-            cv::Mat stereo_img = ptr->image;
-
+            if (!first_img_published) {
+                RCLCPP_INFO(g_node->get_logger(), "Publishing first feature_img frame");
+                first_img_published = true;
+            }
+            cv::Mat stereo_img(ROW * NUM_OF_CAM, COL, CV_8UC3);
             for (int i = 0; i < NUM_OF_CAM; i++)
             {
                 cv::Mat tmp_img = stereo_img.rowRange(i * ROW, (i + 1) * ROW);
-                cv::cvtColor(show_img, tmp_img, CV_GRAY2RGB);
+                cv::cvtColor(show_img.rowRange(i * ROW, (i + 1) * ROW), tmp_img, cv::COLOR_GRAY2BGR);
 
                 for (unsigned int j = 0; j < trackerData[i].cur_pts.size(); j++)
                 {
                     double len = std::min(1.0, 1.0 * trackerData[i].track_cnt[j] / WINDOW_SIZE);
                     cv::circle(tmp_img, trackerData[i].cur_pts[j], 2, cv::Scalar(255 * (1 - len), 0, 255 * len), 2);
-                    //draw speed line
-                    /*
-                    Vector2d tmp_cur_un_pts (trackerData[i].cur_un_pts[j].x, trackerData[i].cur_un_pts[j].y);
-                    Vector2d tmp_pts_velocity (trackerData[i].pts_velocity[j].x, trackerData[i].pts_velocity[j].y);
-                    Vector3d tmp_prev_un_pts;
-                    tmp_prev_un_pts.head(2) = tmp_cur_un_pts - 0.10 * tmp_pts_velocity;
-                    tmp_prev_un_pts.z() = 1;
-                    Vector2d tmp_prev_uv;
-                    trackerData[i].m_camera->spaceToPlane(tmp_prev_un_pts, tmp_prev_uv);
-                    cv::line(tmp_img, trackerData[i].cur_pts[j], cv::Point2f(tmp_prev_uv.x(), tmp_prev_uv.y()), cv::Scalar(255 , 0, 0), 1 , 8, 0);
-                    */
-                    //char name[10];
-                    //sprintf(name, "%d", trackerData[i].ids[j]);
-                    //cv::putText(tmp_img, name, trackerData[i].cur_pts[j], cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
                 }
             }
-            //cv::imshow("vis", stereo_img);
-            //cv::waitKey(5);
-            pub_match.publish(ptr->toImageMsg());
+            // Publish without cv_bridge: pack the bgr8 cv::Mat into a ROS image message.
+            sensor_msgs::msg::Image match_msg;
+            match_msg.header = img_msg->header;
+            match_msg.height = stereo_img.rows;
+            match_msg.width  = stereo_img.cols;
+            match_msg.encoding = "bgr8";
+            match_msg.is_bigendian = 0;
+            match_msg.step = stereo_img.cols * 3;
+            match_msg.data.assign(stereo_img.datastart, stereo_img.dataend);
+            pub_match->publish(match_msg);
         }
     }
-    ROS_INFO("whole feature tracker processing costs: %f", t_r.toc());
+    RCLCPP_INFO(g_node->get_logger(), "whole feature tracker processing costs: %f", t_r.toc());
 }
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "feature_tracker");
-    ros::NodeHandle n("~");
-    ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
-    readParameters(n);
+    rclcpp::init(argc, argv);
+    g_node = std::make_shared<rclcpp::Node>("feature_tracker");
+
+    readParameters(g_node);
 
     for (int i = 0; i < NUM_OF_CAM; i++)
         trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);
@@ -220,27 +207,23 @@ int main(int argc, char **argv)
             trackerData[i].fisheye_mask = cv::imread(FISHEYE_MASK, 0);
             if(!trackerData[i].fisheye_mask.data)
             {
-                ROS_INFO("load mask fail");
-                ROS_BREAK();
+                RCLCPP_INFO(g_node->get_logger(), "load mask fail");
             }
             else
-                ROS_INFO("load mask success");
+                RCLCPP_INFO(g_node->get_logger(), "load mask success");
         }
     }
 
-    ros::Subscriber sub_img = n.subscribe(IMAGE_TOPIC, 100, img_callback);
+    auto sub_img = g_node->create_subscription<sensor_msgs::msg::Image>(
+        IMAGE_TOPIC, 100, img_callback);
 
-    pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
-    pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);
-    pub_restart = n.advertise<std_msgs::Bool>("restart",1000);
-    /*
-    if (SHOW_TRACK)
-        cv::namedWindow("vis", cv::WINDOW_NORMAL);
-    */
-    ros::spin();
+    pub_img = g_node->create_publisher<sensor_msgs::msg::PointCloud>("feature", 1000);
+    pub_match = g_node->create_publisher<sensor_msgs::msg::Image>("feature_img", 1000);
+    pub_restart = g_node->create_publisher<std_msgs::msg::Bool>("restart", 1000);
+    RCLCPP_INFO(g_node->get_logger(), "Publishers created. IMAGE_TOPIC=%s SHOW_TRACK=%d FREQ=%d ROW=%d COL=%d",
+                IMAGE_TOPIC.c_str(), SHOW_TRACK, FREQ, ROW, COL);
+
+    rclcpp::spin(g_node);
+    rclcpp::shutdown();
     return 0;
 }
-
-
-// new points velocity is 0, pub or not?
-// track cnt > 1 pub?

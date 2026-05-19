@@ -1,5 +1,6 @@
 #include "camodocal/camera_models/CameraFactory.h"
 
+#include <iostream>
 #include <boost/algorithm/string.hpp>
 
 
@@ -7,8 +8,6 @@
 #include "camodocal/camera_models/EquidistantCamera.h"
 #include "camodocal/camera_models/PinholeCamera.h"
 #include "camodocal/camera_models/ScaramuzzaCamera.h"
-
-#include "ceres/ceres.h"
 
 namespace camodocal
 {

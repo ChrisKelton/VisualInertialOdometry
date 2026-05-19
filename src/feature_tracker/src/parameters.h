@@ -1,5 +1,5 @@
 #pragma once
-#include <ros/ros.h>
+#include "rclcpp/rclcpp.hpp"
 #include <opencv2/highgui/highgui.hpp>
 
 extern int ROW;
@@ -23,4 +23,4 @@ extern int EQUALIZE;
 extern int FISHEYE;
 extern bool PUB_THIS_FRAME;
 
-void readParameters(ros::NodeHandle &n);
+void readParameters(rclcpp::Node::SharedPtr node);

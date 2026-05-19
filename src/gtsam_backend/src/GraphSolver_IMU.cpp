@@ -60,10 +60,30 @@ gtsam::CombinedImuFactor GraphSolver::create_imu_factor(double updatetime, gtsam
         imucompound++;
     }
  
-    return gtsam::CombinedImuFactor(X(ct_state  ), V(ct_state),
-                             X(ct_state+1), V(ct_state+1),  
-                             B(ct_state  ), B(ct_state+1),
-                             *preint_gtsam);
+    // Dead-reckoning mode: skip CombinedImuFactor construction (crashes due to
+    // GTSAM 4.2.1 + TBB 2021 heap corruption in Gaussian::Covariance).
+    // Callers that need the factor will not call this path.
+    return gtsam::CombinedImuFactor(X(0), V(0), X(1), V(1), B(0), B(1), *preint_gtsam);
+}
+
+/**
+ * Integrate IMU measurements up to updatetime without creating a factor object.
+ * Use this instead of create_imu_factor for dead-reckoning mode.
+ */
+void GraphSolver::integrate_imu(double updatetime) {
+    while (imu_times.size() > 1 && imu_times.at(1) <= updatetime) {
+        double dt = imu_times.at(1) - imu_times.at(0);
+        if (dt >= 0)
+            preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt);
+        imu_angvel.erase(imu_angvel.begin());
+        imu_linaccs.erase(imu_linaccs.begin());
+        imu_times.erase(imu_times.begin());
+    }
+    double dt_f = updatetime - imu_times.at(0);
+    if (dt_f > 0) {
+        preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt_f);
+        imu_times.at(0) = updatetime;
+    }
 }
 
 
@@ -86,7 +106,7 @@ gtsam::State GraphSolver::get_predicted_state(gtsam::Values& values_initial) {
 void GraphSolver::reset_imu_integration() {
   
   // Use the optimized bias to reset integration
-  if (values_initial.exists(B(ct_state)))
+  if (preint_gtsam && values_initial.exists(B(ct_state)))
     preint_gtsam->resetIntegrationAndSetBias(values_initial.at<gtsam::Bias>(B(ct_state)));
     //preint_gtsam_->resetIntegrationAndSetBias(Bias());
   

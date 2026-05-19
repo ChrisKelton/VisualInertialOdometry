@@ -19,31 +19,33 @@ int FISHEYE;
 bool PUB_THIS_FRAME;
 
 template <typename T>
-T readParam(ros::NodeHandle &n, std::string name)
+T readParam(rclcpp::Node::SharedPtr node, const std::string& name)
 {
     T ans;
-    if (n.getParam(name, ans))
+    if (node->get_parameter(name, ans))
     {
-        ROS_INFO_STREAM("Loaded " << name << ": " << ans);
+        RCLCPP_INFO_STREAM(node->get_logger(), "Loaded " << name << ": " << ans);
     }
     else
     {
-        ROS_ERROR_STREAM("Failed to load " << name);
-        n.shutdown();
+        RCLCPP_ERROR_STREAM(node->get_logger(), "Failed to load " << name);
+        rclcpp::shutdown();
     }
     return ans;
 }
 
-void readParameters(ros::NodeHandle &n)
+void readParameters(rclcpp::Node::SharedPtr node)
 {
-    std::string config_file;
-    config_file = readParam<std::string>(n, "config_file");
+    node->declare_parameter<std::string>("config_file", "");
+    node->declare_parameter<std::string>("vins_folder", "");
+
+    std::string config_file = readParam<std::string>(node, "config_file");
     cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
     }
-    std::string VINS_FOLDER_PATH = readParam<std::string>(n, "vins_folder");
+    std::string VINS_FOLDER_PATH = readParam<std::string>(node, "vins_folder");
 
     fsSettings["image_topic"] >> IMAGE_TOPIC;
     fsSettings["imu_topic"] >> IMU_TOPIC;
@@ -69,6 +71,4 @@ void readParameters(ros::NodeHandle &n)
         FREQ = 100;
 
     fsSettings.release();
-
-
 }

@@ -36,3 +36,10 @@ devel/
 *.exe
 *.out
 *.app
+
+.idea/
+__pycache__/
+install/
+log/
+mvsec_test_ros2/
+CMakeFiles/
