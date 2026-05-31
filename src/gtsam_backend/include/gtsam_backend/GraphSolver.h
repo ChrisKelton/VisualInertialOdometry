@@ -17,6 +17,8 @@
 #include <gtsam/slam/ProjectionFactor.h>
 #include <gtsam/slam/SmartProjectionPoseFactor.h>
 
+#include <rclcpp/rclcpp.hpp>
+
 #include "utils/Config.h"
 #include "utils/State.h"
 
@@ -56,7 +58,7 @@ public:
   void addmeasurement_uv(double timestamp, std::vector<uint> leftids, std::vector<Eigen::Vector2d> leftuv);
 
   /// This function will optimize the graph
-  void optimize();
+  void optimize(const rclcpp::Logger& logger);
   
   /// This function returns the current state, return origin if we have not initialized yet
   gtsam::State get_state(size_t ct) {
@@ -114,10 +116,10 @@ private:
 
   // ******************************* TODO ********************************* //
   bool set_imu_preintegration(const gtsam::State& prior_state);
-  void integrate_imu(double updatetime);
+  // void integrate_imu(double updatetime);
 
   // Function that will compound the GTSAM preintegrator to get discrete preintegration measurement
-  gtsam::CombinedImuFactor create_imu_factor(double updatetime, gtsam::Values& values_initial);
+  gtsam::CombinedImuFactor create_imu_factor(double updatetime);
 
   // Function will get the predicted Navigation State based on this generated measurement 
   gtsam::State get_predicted_state(gtsam::Values& values_initial);
@@ -171,4 +173,14 @@ private:
   /// Lookup tables for features
   std::mutex features_mutex;
   std::unordered_map<int, SmartFactor::shared_ptr> measurement_smart_lookup_left;
+
+  // Maps feature ID to the ISAM2 factor index of its SmartFactor.
+  // Required so we can remove-and-re-add the factor each time it gains a new
+  // observation; without this, ISAM2's variableIndex_ becomes inconsistent with
+  // the factor's actual key set, corrupting the Bayes tree and causing SIGSEGV.
+  std::unordered_map<int, size_t> smart_factor_isam_index_left_;
+
+  // Populated by process_feat_smart, consumed by optimize() each cycle.
+  gtsam::FactorIndices smart_factors_to_remove_;
+  std::vector<std::pair<int, size_t>> smart_factor_graph_new_entries_;  // (feature_id, position in graph_new)
 };

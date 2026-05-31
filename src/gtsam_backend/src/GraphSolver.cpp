@@ -42,9 +42,13 @@ void GraphSolver::addmeasurement_uv(double timestamp, std::vector<uint> leftids,
 
   } else {
 
-      // Integrate IMU measurements for state prediction (skip CombinedImuFactor
-      // construction — crashes with GTSAM 4.2.1 + TBB 2021 on this system).
-      integrate_imu(timestamp);
+      // Forster2 discrete preintegration
+      gtsam::CombinedImuFactor imuFactor = create_imu_factor(timestamp);
+      graph_new->add(imuFactor);
+      graph->add(imuFactor);
+      // // Integrate IMU measurements for state prediction (skip CombinedImuFactor
+      // // construction — crashes with GTSAM 4.2.1 + TBB 2021 on this system).
+      // integrate_imu(timestamp);
 
       // Original models
       gtsam::State newstate = get_predicted_state(values_initial);
@@ -71,20 +75,49 @@ void GraphSolver::addmeasurement_uv(double timestamp, std::vector<uint> leftids,
   // Request access
   std::unique_lock<std::mutex> features_lock(features_mutex);
 
-  // Smart feature factors — disabled to isolate GTSAM SIGSEGV; IMU-only for now
-  // process_feat_smart(timestamp, leftids, leftuv);
+  // If we are using inverse depth, then lets call on it
+  process_feat_smart(timestamp, leftids, leftuv);
+  // // Smart feature factors — disabled to isolate GTSAM SIGSEGV; IMU-only for now
+  // // process_feat_smart(timestamp, leftids, leftuv);
 }
 
-void GraphSolver::optimize() {
+void GraphSolver::optimize(const rclcpp::Logger& logger) {
 
   // Return if not initialized
   if(!systeminitalized && ct_state < 2)
       return;
 
-  // GTSAM ISAM2 and LM both crash on this system (GTSAM 4.2.1 + TBB 2021
-  // concurrent_unordered_map allocator incompatibility).
-  // IMU dead-reckoning: states are already inserted into values_initial by
-  // addmeasurement_uv via get_predicted_state(); just clear the buffers.
+  // Perform smoothing update
+  try {
+    gtsam::ISAM2Result result = isam2->update(*graph_new, values_new, smart_factors_to_remove_);
+
+    // Record the new ISAM2 factor index for each SmartFactor that was added or
+    // replaced this cycle; result.newFactorsIndices[i] corresponds to graph_new[i].
+    for (auto& [feat_id, graph_pos] : smart_factor_graph_new_entries_)
+      smart_factor_isam_index_left_[feat_id] = result.newFactorsIndices[graph_pos];
+    smart_factors_to_remove_.clear();
+    smart_factor_graph_new_entries_.clear();
+
+    values_initial = isam2->calculateEstimate();
+  } catch (gtsam::IndeterminantLinearSystemException& e) {
+    RCLCPP_ERROR(logger, "FORSTER2 gtsam indeterminate linear system exception!");
+    std::cerr << e.what() << std::endl;
+    exit(EXIT_FAILURE);
+  } catch (const std::runtime_error& e) {
+    RCLCPP_ERROR(logger, "FORSTER2 gtsam | Runtime error: '%s'!", e.what());
+    exit(EXIT_FAILURE);
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger, "FORSTER2 gtsam | Standard error: '%s'!", e.what());
+    exit(EXIT_FAILURE);
+  } catch (...) {
+    RCLCPP_ERROR(logger, "FORSTER2 gtsam | Unknown error!");
+    exit(EXIT_FAILURE);
+  }
+
+  // // GTSAM ISAM2 and LM both crash on this system (GTSAM 4.2.1 + TBB 2021
+  // // concurrent_unordered_map allocator incompatibility).
+  // // IMU dead-reckoning: states are already inserted into values_initial by
+  // // addmeasurement_uv via get_predicted_state(); just clear the buffers.
 
   // Remove the used up nodes
   values_new.clear();

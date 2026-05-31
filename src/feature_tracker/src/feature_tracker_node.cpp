@@ -89,7 +89,7 @@ void img_callback(const sensor_msgs::msg::Image::ConstSharedPtr img_msg)
         }
 
 #if SHOW_UNDISTORTION
-        trackerData[i].showUndistortion("undistrotion_" + std::to_string(i));
+        trackerData[i].showUndistortion("undistortion_" + std::to_string(i));
 #endif
     }
 

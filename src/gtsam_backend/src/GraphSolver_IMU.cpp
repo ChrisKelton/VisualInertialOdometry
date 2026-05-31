@@ -22,11 +22,12 @@ bool GraphSolver::set_imu_preintegration(const gtsam::State& prior_state) {
  * This function will create a discrete IMU factor using the GTSAM preintegrator class
  * This will integrate from the current state time up to the new update time
  */
-gtsam::CombinedImuFactor GraphSolver::create_imu_factor(double updatetime, gtsam::Values& values_initial) {
+gtsam::CombinedImuFactor GraphSolver::create_imu_factor(double updatetime) {
 
     int imucompound = 0;
 
     // TODO: Clean this code, and use the mutex
+    // Integrate all imu measurements stored
     while(imu_times.size() > 1 && imu_times.at(1) <= updatetime) {
         double dt = imu_times.at(1) - imu_times.at(0);
         if (dt >= 0) {
@@ -47,6 +48,8 @@ gtsam::CombinedImuFactor GraphSolver::create_imu_factor(double updatetime, gtsam
     }
 
     // TODO: Clean this code, and use the mutex
+    // Since we are erasing measurements as we go above, then we add the final measurement, which is now the only
+    // item stored in the imu_* variables.
     double dt_f = updatetime - imu_times.at(0);
     if (dt_f > 0) {
         // Our IMU measurement
@@ -59,32 +62,33 @@ gtsam::CombinedImuFactor GraphSolver::create_imu_factor(double updatetime, gtsam
         imu_times.at(0) = updatetime;
         imucompound++;
     }
- 
-    // Dead-reckoning mode: skip CombinedImuFactor construction (crashes due to
-    // GTSAM 4.2.1 + TBB 2021 heap corruption in Gaussian::Covariance).
-    // Callers that need the factor will not call this path.
-    return gtsam::CombinedImuFactor(X(0), V(0), X(1), V(1), B(0), B(1), *preint_gtsam);
+
+    return gtsam::CombinedImuFactor(X(ct_state), V(ct_state), X(ct_state+1), V(ct_state+1), B(ct_state), B(ct_state+1), *preint_gtsam);
+    // // Dead-reckoning mode: skip CombinedImuFactor construction (crashes due to
+    // // GTSAM 4.2.1 + TBB 2021 heap corruption in Gaussian::Covariance).
+    // // Callers that need the factor will not call this path.
+    // return gtsam::CombinedImuFactor(X(0), V(0), X(1), V(1), B(0), B(1), *preint_gtsam);
 }
 
-/**
- * Integrate IMU measurements up to updatetime without creating a factor object.
- * Use this instead of create_imu_factor for dead-reckoning mode.
- */
-void GraphSolver::integrate_imu(double updatetime) {
-    while (imu_times.size() > 1 && imu_times.at(1) <= updatetime) {
-        double dt = imu_times.at(1) - imu_times.at(0);
-        if (dt >= 0)
-            preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt);
-        imu_angvel.erase(imu_angvel.begin());
-        imu_linaccs.erase(imu_linaccs.begin());
-        imu_times.erase(imu_times.begin());
-    }
-    double dt_f = updatetime - imu_times.at(0);
-    if (dt_f > 0) {
-        preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt_f);
-        imu_times.at(0) = updatetime;
-    }
-}
+// /**
+//  * Integrate IMU measurements up to updatetime without creating a factor object.
+//  * Use this instead of create_imu_factor for dead-reckoning mode.
+//  */
+// void GraphSolver::integrate_imu(double updatetime) {
+//     while (imu_times.size() > 1 && imu_times.at(1) <= updatetime) {
+//         double dt = imu_times.at(1) - imu_times.at(0);
+//         if (dt >= 0)
+//             preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt);
+//         imu_angvel.erase(imu_angvel.begin());
+//         imu_linaccs.erase(imu_linaccs.begin());
+//         imu_times.erase(imu_times.begin());
+//     }
+//     double dt_f = updatetime - imu_times.at(0);
+//     if (dt_f > 0) {
+//         preint_gtsam->integrateMeasurement(imu_linaccs.at(0), imu_angvel.at(0), dt_f);
+//         imu_times.at(0) = updatetime;
+//     }
+// }
 
 
 /**

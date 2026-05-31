@@ -51,6 +51,7 @@ private:
 
     void setup_config() {
         config->fixedId = "global";
+        // declare_parameter is specific to rclcpp::Node.
         config->fixedId = this->declare_parameter<std::string>("fixedId", config->fixedId);
 
         std::vector<double> gravity = {0, 0, 9.8};
@@ -170,7 +171,7 @@ private:
     }
 
     void optimize_graph(double timestamp) {
-        graphsolver->optimize();
+        graphsolver->optimize(this->get_logger());
 
         gtsam::State state = graphsolver->get_current_state();
         publish_state(timestamp, state);

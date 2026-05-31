@@ -17,8 +17,8 @@ public:
   int featWait;
 
   /// Relative transform between CAM0 and IMU
-  Eigen::Matrix<double,3,1, Eigen::DontAlign> p_IinC0;
-  Eigen::Matrix<double,3,3, Eigen::DontAlign> R_C0toI;
+  Eigen::Matrix<double,3,1, Eigen::DontAlign> p_IinC0;  // translation from camera origin to IMU origin
+  Eigen::Matrix<double,3,3, Eigen::DontAlign> R_C0toI;  // rotation from camera to IMU
 
   /// Priors
   Eigen::Matrix<double, 4, 1, Eigen::DontAlign> prior_qGtoI;
