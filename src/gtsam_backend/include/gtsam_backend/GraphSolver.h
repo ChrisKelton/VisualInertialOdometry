@@ -43,7 +43,7 @@ public:
     isam_params.relinearizeThreshold = 0.01;
     isam_params.relinearizeSkip = 1;
     isam_params.cacheLinearizedFactors = false;
-    isam_params.enableDetailedResults = true;
+    isam_params.enableDetailedResults = false;
     isam_params.print();
     this->isam2 = new gtsam::ISAM2(isam_params);
   }
@@ -55,7 +55,7 @@ public:
   void addmeasurement_imu(double timestamp, Eigen::Vector3d linacc, Eigen::Vector3d angvel, Eigen::Vector4d orientation);
 
   /// Function that takes in UV measurements that will be used as "features" in our graph
-  void addmeasurement_uv(double timestamp, std::vector<uint> leftids, std::vector<Eigen::Vector2d> leftuv);
+  void addmeasurement_uv(double timestamp, std::vector<uint> leftids, std::vector<Eigen::Vector2d> leftuv, const rclcpp::Logger& logger);
 
   /// This function will optimize the graph
   void optimize(const rclcpp::Logger& logger);
@@ -75,10 +75,10 @@ public:
     return get_state(ct_state);
   }
 
-
-  Trajectory get_trajectory() {
+  Trajectory get_trajectory(const rclcpp::Logger& logger) {
     // Return if we do not have any nodes yet
     if (values_initial.empty()) {
+      RCLCPP_INFO(logger, "'values_initial' is empty. Returning empty trajectory...");
       Trajectory traj;
       traj.push_back(std::make_pair(0.0, gtsam::State()));
       return traj;
@@ -102,20 +102,24 @@ public:
       std::vector<Eigen::Vector3d> features;
       // Else loop through the features and return them
       for (auto element : measurement_smart_lookup_left) {
-       boost::optional<gtsam::Point3> point = element.second->point(values_initial);
+       gtsam::TriangulationResult point = element.second->point(values_initial);
        if (point)
          features.push_back(*point);
       }
       return features;
   }
 
+  std::deque<double> get_imu_times() {
+    return imu_times;
+  }
+
 private:
   /// Functions
   // Function which will try to initalize our graph using the current IMU measurements
-  void initialize(double timestamp);
+  void initialize(double timestamp, const rclcpp::Logger& logger);
 
   // ******************************* TODO ********************************* //
-  bool set_imu_preintegration(const gtsam::State& prior_state);
+  bool set_imu_preintegration(const gtsam::State& prior_state, const rclcpp::Logger& logger);
   // void integrate_imu(double updatetime);
 
   // Function that will compound the GTSAM preintegrator to get discrete preintegration measurement

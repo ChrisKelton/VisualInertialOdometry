@@ -135,6 +135,7 @@ private:
     }
 
     void handle_measurement_imu(const sensor_msgs::msg::Imu::ConstSharedPtr msg) {
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *(this->get_clock()), 500, "Ingesting new imu measurement, '%zu' total measurements", graphsolver->get_imu_times().size());
         Eigen::Vector3d linearacceleration;
         linearacceleration << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
         Eigen::Vector3d angularvelocity;
@@ -165,8 +166,9 @@ private:
             leftuv.push_back(uv);
         }
 
+        RCLCPP_INFO(this->get_logger(), "Adding '%zu' features for frame.", leftuv.size());
         double timestamp = rclcpp::Time(msg->header.stamp).seconds();
-        graphsolver->addmeasurement_uv(timestamp, leftids, leftuv);
+        graphsolver->addmeasurement_uv(timestamp, leftids, leftuv, this->get_logger());
         optimize_graph(timestamp);
     }
 
@@ -175,7 +177,7 @@ private:
 
         gtsam::State state = graphsolver->get_current_state();
         publish_state(timestamp, state);
-        std::vector<std::pair<double, gtsam::State>> trajectory = graphsolver->get_trajectory();
+        std::vector<std::pair<double, gtsam::State>> trajectory = graphsolver->get_trajectory(this->get_logger());
         if (!trajectory.empty()) {
             const auto& p = trajectory.back().second.p();
             RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,

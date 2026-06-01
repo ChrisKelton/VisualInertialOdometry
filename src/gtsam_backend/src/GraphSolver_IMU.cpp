@@ -1,20 +1,26 @@
 #include "GraphSolver.h"
 
-bool GraphSolver::set_imu_preintegration(const gtsam::State& prior_state) {
+bool GraphSolver::set_imu_preintegration(const gtsam::State& prior_state, const rclcpp::Logger& logger) {
 
+  RCLCPP_INFO(logger, "Creating GTSAM preintegration");
   // Create GTSAM preintegration parameters for use with Foster's version
-  boost::shared_ptr<gtsam::PreintegratedCombinedMeasurements::Params> params;
-  params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity(2));  // Z-up navigation frame: gravity points along negative Z-axis !!!
-  
+  // std::shared_ptr<gtsam::PreintegratedCombinedMeasurements::Params> params;
+  // RCLCPP_INFO(logger, "[set_imu_preintegration]: Created params");
+  auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity(2));  // Z-up navigation frame: gravity points along negative Z-axis !!!
+  RCLCPP_INFO(logger, "[set_imu_preintegration]: Created parameters.");
+
   params->setAccelerometerCovariance(gtsam::I_3x3 * config->sigma_a_sq);  // acc white noise in continuous
   params->setGyroscopeCovariance(gtsam::I_3x3 * config->sigma_g_sq);  // gyro white noise in continuous
   params->biasAccCovariance = config->sigma_wa_sq * gtsam::Matrix33::Identity(3,3);  // acc bias in continuous
   params->biasOmegaCovariance = config->sigma_wg_sq * gtsam::Matrix33::Identity(3,3);  // gyro bias in continuous
   params->setIntegrationCovariance(gtsam::I_3x3 * 0.1);  // error committed in integrating position from velocities
   params->biasAccOmegaInt = 1e-5*gtsam::Matrix66::Identity(6,6); // error in the bias used for preintegration
-  
+  RCLCPP_INFO(logger, "[set_imu_preintegration]: Filled in parameters.");
+
   // Actually create the GTSAM preintegration
   preint_gtsam = new gtsam::PreintegratedCombinedMeasurements(params, prior_state.b());
+  RCLCPP_INFO(logger, "[set_imu_preintegration]: Created GTSAM preintegration");
+
   return true;
 }
 

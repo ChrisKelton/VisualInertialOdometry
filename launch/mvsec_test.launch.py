@@ -33,7 +33,12 @@ def generate_launch_description():
         executable='vio',
         name='vio',
         output='screen',
-        additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/libtbbmalloc_proxy.so.2'},
+        # LD_PRELOAD for /opt/intel/oneapi/tbb/2023.0/lib/intel64/gcc4.8/libtbb.so.12
+        # was needed when GTSAM was compiled with TBB enabled to supply the missing
+        # symbol get_thread_reference_vertex. After rebuilding GTSAM with
+        # -DGTSAM_WITH_TBB=OFF, GTSAM no longer references TBB symbols at all, so
+        # the preload is no longer required and was causing heap corruption on startup.
+        additional_env={},
         remappings=[
             ('/vio/data_imu', '/visensor/imu'),
             ('/vio/data_uv',  '/feature_tracker/feature'),

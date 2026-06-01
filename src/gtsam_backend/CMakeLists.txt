@@ -13,15 +13,20 @@ find_package(geometry_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
 find_package(PCL REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
+message(WARNING "Eigen version: ${Eigen3_VERSION}")
 find_package(GTSAM REQUIRED)
-find_package(TBB REQUIRED CONFIG)
+message(WARNING "Eigen version: ${Eigen3_VERSION}")
+#find_package(TBB REQUIRED CONFIG)
 
-# Use GTSAM's bundled Eigen 3 to match the version GTSAM was compiled with
-set(EIGEN_INCLUDE_DIR /usr/local/include/gtsam/3rdparty/Eigen)
+### Use GTSAM's bundled Eigen 3 to match the version GTSAM was compiled with
+##set(EIGEN_INCLUDE_DIR /usr/local/include/gtsam/3rdparty/Eigen)
+#find_package(Eigen3 CONFIG REQUIRED)
+#set(EIGEN_INCLUDE_DIR Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
 
 include_directories(
     include/gtsam_backend
-    ${EIGEN_INCLUDE_DIR}
+#    ${EIGEN_INCLUDE_DIR}
     ${PCL_INCLUDE_DIRS}
     ${GTSAM_INCLUDE_DIR}
 )
@@ -53,6 +58,21 @@ target_link_libraries(vio
     gtsam
     gtsam_unstable
     ${PCL_LIBRARIES}
+        Eigen3::Eigen
+)
+
+# Prevent weak TBB template symbols (e.g. concurrent_unordered_base::internal_clear)
+# compiled into this executable from interposing on the same symbols in libgtsam.so.4.
+# Without this, Linux's dynamic linker prefers the executable's weak definition, which
+# can have different codegen than the libgtsam version and causes heap corruption when
+# the two disagree on which allocator (scalable vs libc) owns a pointer.
+target_compile_options(vio PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden
+#    # Match GTSAM's -march=native build so Eigen uses the same EIGEN_MAX_ALIGN_BYTES
+#    # (32 bytes for AVX2 vs 16 bytes for SSE).  Without this, sizeof(Pose3) differs
+#    # between gtsam_backend and libgtsam.so.4, causing GTSAM to read 16 bytes past
+#    # the end of every Pose3 stored in gtsam::Values, corrupting the heap.
+#    -march=native
 )
 
 install(TARGETS vio
