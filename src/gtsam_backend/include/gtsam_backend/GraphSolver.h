@@ -43,7 +43,7 @@ public:
     isam_params.relinearizeThreshold = 0.01;
     isam_params.relinearizeSkip = 1;
     isam_params.cacheLinearizedFactors = false;
-    isam_params.enableDetailedResults = false;
+    isam_params.enableDetailedResults = true;
     isam_params.print();
     this->isam2 = new gtsam::ISAM2(isam_params);
   }

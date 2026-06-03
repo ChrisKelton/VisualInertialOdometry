@@ -14,19 +14,11 @@ find_package(pcl_conversions REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
-message(WARNING "Eigen version: ${Eigen3_VERSION}")
 find_package(GTSAM REQUIRED)
-message(WARNING "Eigen version: ${Eigen3_VERSION}")
 #find_package(TBB REQUIRED CONFIG)
-
-### Use GTSAM's bundled Eigen 3 to match the version GTSAM was compiled with
-##set(EIGEN_INCLUDE_DIR /usr/local/include/gtsam/3rdparty/Eigen)
-#find_package(Eigen3 CONFIG REQUIRED)
-#set(EIGEN_INCLUDE_DIR Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
 
 include_directories(
     include/gtsam_backend
-#    ${EIGEN_INCLUDE_DIR}
     ${PCL_INCLUDE_DIRS}
     ${GTSAM_INCLUDE_DIR}
 )

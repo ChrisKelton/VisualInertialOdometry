@@ -4,8 +4,6 @@ bool GraphSolver::set_imu_preintegration(const gtsam::State& prior_state, const 
 
   RCLCPP_INFO(logger, "Creating GTSAM preintegration");
   // Create GTSAM preintegration parameters for use with Foster's version
-  // std::shared_ptr<gtsam::PreintegratedCombinedMeasurements::Params> params;
-  // RCLCPP_INFO(logger, "[set_imu_preintegration]: Created params");
   auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity(2));  // Z-up navigation frame: gravity points along negative Z-axis !!!
   RCLCPP_INFO(logger, "[set_imu_preintegration]: Created parameters.");
 
