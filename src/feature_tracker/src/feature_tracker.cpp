@@ -78,7 +78,7 @@ void FeatureTracker::addPoints()
     }
 }
 
-void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
+void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time, const rclcpp::Logger& logger)
 {
     cv::Mat img;
     TicToc t_r;
@@ -89,6 +89,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
         TicToc t_c;
         clahe->apply(_img, img);
+        RCLCPP_INFO(logger, "[Feat] CLAHE costs: %fms", t_c.toc());
         // RCLCPP_DEBUG: CLAHE costs
     }
     else
@@ -121,7 +122,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         reduceVector(ids, status);
         reduceVector(cur_un_pts, status);
         reduceVector(track_cnt, status);
-        (void)t_o;
+        RCLCPP_INFO(logger, "[Feat] Temporal optical flow costs: %fms", t_o.toc());
     }
 
     for (auto &n : track_cnt)
@@ -129,10 +130,10 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 
     if (PUB_THIS_FRAME)
     {
-        rejectWithF();
+        rejectWithF(logger);
         TicToc t_m;
         setMask();
-        (void)t_m;
+        RCLCPP_INFO(logger, "[FEAT] Set mask costs %fms", t_m.toc());
 
         TicToc t_t;
         int n_max_cnt = MAX_CNT - static_cast<int>(forw_pts.size());
@@ -148,11 +149,11 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         }
         else
             n_pts.clear();
-        (void)t_t;
+        RCLCPP_INFO(logger, "[Feat] Detect feature costs: %fms", t_t.toc());
 
         TicToc t_a;
         addPoints();
-        (void)t_a;
+        RCLCPP_INFO(logger, "[Feat] selectFeature costs: %fms", t_a.toc());
     }
     prev_img = cur_img;
     prev_pts = cur_pts;
@@ -163,7 +164,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     prev_time = cur_time;
 }
 
-void FeatureTracker::rejectWithF()
+void FeatureTracker::rejectWithF(const rclcpp::Logger& logger)
 {
     if (forw_pts.size() >= 8)
     {
@@ -192,7 +193,8 @@ void FeatureTracker::rejectWithF()
         reduceVector(cur_un_pts, status);
         reduceVector(ids, status);
         reduceVector(track_cnt, status);
-        (void)t_f;
+        RCLCPP_INFO(logger, "[Feat] FM ransac: %d -> %lu: %f", size_a, forw_pts.size(), 1.0 * forw_pts.size() / size_a);
+        RCLCPP_INFO(logger, "[Feat] FM ransac costs: %fms", t_f.toc());
     }
 }
 

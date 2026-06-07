@@ -31,7 +31,7 @@ typedef gtsam::SmartProjectionPoseFactor<gtsam::Cal3_S2> SmartFactor;
 
 class GraphSolver {
 public:
-  GraphSolver(Config* config) {
+  GraphSolver(Config* config, bool publish_landmark_covariances = false) {
     
     // Set up config
     this->config = config;
@@ -44,8 +44,20 @@ public:
     isam_params.relinearizeSkip = 1;
     isam_params.cacheLinearizedFactors = false;
     isam_params.enableDetailedResults = true;
+
+    // // ISAM2 Dogleg parameters (adds damping to prevent indeterminate linear system crashes)
+    // gtsam::ISAM2DoglegParams dogleg_params;
+    // // Adjust initial trust region radius if needed (default is usually 1.0)
+    // dogleg_params.initialDelta = 1.0;
+    // // Assign dogleg parameters to the main solver parameters
+    // isam_params.optimizationParams = dogleg_params;
+
     isam_params.print();
     this->isam2 = new gtsam::ISAM2(isam_params);
+
+
+    // Flag to publish landmark covariances
+    this->publish_landmark_covariances = publish_landmark_covariances;
   }
 
   /// Will return true if the system is initialized
@@ -94,20 +106,47 @@ public:
   
   /// Returns the currently tracked features
   std::vector<Eigen::Vector3d> get_current_features() {
-      // Return if we do not have any nodes yet
       if(values_initial.empty()) {
           return std::vector<Eigen::Vector3d>();
       }
-      // Our vector of points in the global
       std::vector<Eigen::Vector3d> features;
-      // Else loop through the features and return them
-      for (auto element : measurement_smart_lookup_left) {
-       gtsam::TriangulationResult point = element.second->point(values_initial);
-       if (point)
-         features.push_back(*point);
+      for (auto& [id, f] : measurement_smart_lookup_left) {
+          // Skip factors not yet inserted into ISAM2 — pending factors (< 3
+          // observations) triangulate from dead-reckoned poses and produce
+          // garbage 3D points that appear to jump far from the trajectory.
+          if (!smart_factor_isam_index_left_.count(id)) continue;
+          gtsam::TriangulationResult point = f->point(values_initial);
+          if (point)
+              features.push_back(*point);
       }
       return features;
   }
+
+  // std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> get_current_features() {
+  //   // Return if we do not have any nodes yet
+  //   if(values_initial.empty()) {
+  //     return std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>>();
+  //   }
+  //   // Our vector of points in the global
+  //   std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> features_and_covariances;
+  //   // Else loop through the features and return them
+  //   for (auto element : measurement_smart_lookup_left) {
+  //     // gtsam::TriangulationResult tr_point = element.second->point(values_initial);
+  //     auto factor = element.second;
+  //     // Collect the keys of the poses observing this landmark
+  //     gtsam::KeyVector poseKeys = factor->keys();
+  //     // For a full joint covariance, extract the blocks or request them individually
+  //     gtsam::Matrix cov_pose_i = isam2->marginalCovariance(poseKeys[0]);
+  //     gtsam::TriangulationResult tr_point = factor->point(values_initial);
+  //     if (tr_point.valid()) {
+  //       gtsam::Point3 point = *tr_point;
+  //       Eigen::Matrix3d covariance;
+  //       covariance = factor->pointCov
+  //       features_and_covariances.push_back(std::make_pair(point, covariance));
+  //     }
+  //   }
+  //   return features_and_covariances;
+  // }
 
   std::deque<double> get_imu_times() {
     return imu_times;
@@ -132,8 +171,14 @@ private:
   void reset_imu_integration();
 
   // Smart feature measurements
-  void process_feat_smart(double timestamp, std::vector<uint> leftids, std::vector<Eigen::Vector2d> leftuv);
+  void process_feat_smart(double timestamp, std::vector<uint> leftids, std::vector<Eigen::Vector2d> leftuv, const rclcpp::Logger& logger);
+
+  // Rebuild ISAM2 from the full factor graph after a failed update
+  void rebuild_isam2(const rclcpp::Logger& logger);
   // ******************************* END TODO ********************************* //
+
+  // TODO: Implement
+  void get_covariance_of_landmarks() {};
 
   /// Members
   /// Config object (has all sensor noise values)
@@ -145,6 +190,9 @@ private:
   // Master non-linear GTSAM graph, all created factors
   gtsam::NonlinearFactorGraph* graph;
 
+  // Last estimated state
+  gtsam::State prev_state;
+
   // New nodes that have not been optimized
   gtsam::Values values_new;
   
@@ -153,6 +201,7 @@ private:
 
   // ISAM2 solvers
   gtsam::ISAM2* isam2;
+  bool publish_landmark_covariances = false;
 
   // Current ID of state and features
   size_t ct_state = 0;
@@ -160,6 +209,9 @@ private:
 
   /// Boolean that tracks if we have initialized
   bool systeminitalized = false;
+
+  /// True once the init window is full and ISAM2 has received its first batch update.
+  bool isam2_initialized_ = false;
 
   std::unordered_map<double, size_t> ct_state_lookup; // ct state based on timestamp
   std::unordered_map<size_t, double> timestamp_lookup;

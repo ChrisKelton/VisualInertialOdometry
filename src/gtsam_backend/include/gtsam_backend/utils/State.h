@@ -3,27 +3,32 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/ImuBias.h>
 
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>  // Needed for deserialization
+#include <gtsam/base/MatrixSerialization.h>  // Eigen Vector3 support
+
 namespace gtsam {
 
 typedef imuBias::ConstantBias Bias;
-  
+
 class State {
   private:
     Pose3 pose_;       // Rotation from global to IMU, Position of IMU in global
     Vector3 velocity_; // Velocity of IMU in global
     Bias bias_;        // Bias of IMU
 
+    friend class boost::serialization::access;
   public:
     // Default Constructor
     State() : pose_(Pose3()), velocity_(Vector3()), bias_(Bias()) {}
-    
+
     // Copy Constructor
     State(const State& state) {
       this->pose_     = state.pose_;
       this->velocity_ = state.velocity_;
       this->bias_     = state.bias_;
     }
-   
+
     // Constructor
     State(const Pose3& pose, const Vector3& velocity, const Bias& bias) {
       this->pose_     = pose;
@@ -65,7 +70,7 @@ class State {
     Quaternion q() const {
       return pose().rotation().toQuaternion();
     }
- 
+
     // Return translation as Vector3
     Vector3 p() const {
       return pose().translation();
@@ -84,7 +89,7 @@ class State {
     /// How this node gets printed in the ostream
     GTSAM_EXPORT
     friend std::ostream &operator<<(std::ostream &os, const State& state) {
-        os << "[STATE]: q = " << std::fixed << state.q().x() << ", " << std::fixed << state.q().y() << ", " 
+        os << "[STATE]: q = " << std::fixed << state.q().x() << ", " << std::fixed << state.q().y() << ", "
                               << std::fixed << state.q().z() << ", " << std::fixed << state.q().w() << " | ";
         os << "p = "  << std::fixed << state.p()(0) << ", "  << std::fixed << state.p()(1)  << ", " << std::fixed << state.p()(2)  << " | ";
         os << "v = "  << std::fixed << state.v()(0) << ", "  << std::fixed << state.v()(1)  << ", " << std::fixed << state.v()(2)  << " | ";
@@ -98,6 +103,26 @@ class State {
       std::cout << s << *this << std::endl;
     }
 
+    template<class Archive>
+    void serialize(Archive& ar, const unsigned int version) {
+      ar& BOOST_SERIALIZATION_NVP(pose_);
+      ar& BOOST_SERIALIZATION_NVP(velocity_);
+      ar& BOOST_SERIALIZATION_NVP(bias_);
+    };
+
+    // Overload compound subtraction assignment as a member function
+    State& operator-=(const State& other) {
+      this->set_pose(this->pose().between(other.pose()));
+      this->set_velocity(this->v() - other.v());
+      this->set_bias(this->b() - other.b());
+      return *this;  // Return a reference to the modified object
+    }
+
+    // Overload binary subtraction as a non-member friend function
+    friend State operator-(State lhs, const State& rhs) {
+      lhs -= rhs;  // Reuse the member operator-=
+      return lhs;  // Return by value
+    }
 }; // State class
 
 } // namespace gtsam

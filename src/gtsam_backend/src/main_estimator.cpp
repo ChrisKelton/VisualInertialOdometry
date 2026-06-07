@@ -8,6 +8,9 @@
 #include <execinfo.h>
 #include <unistd.h>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 #include "rclcpp/rclcpp.hpp"
 #include <sensor_msgs/msg/imu.hpp>
@@ -18,9 +21,21 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+// Used for serializing out trajectories
+//#include <sstream>
+//#include <iomanip>
+//#include <fstream>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/utility.hpp>
+
 #include "GraphSolver.h"
 #include "utils/Config.h"
 #include "utils/Convert.h"
+
+
+bool PublishLandmarkCovariances = true;
+
 
 class VioNode : public rclcpp::Node {
 public:
@@ -29,7 +44,7 @@ public:
         setup_config();
         setup_subpub();
 
-        graphsolver = new GraphSolver(config);
+        graphsolver = new GraphSolver(config, PublishLandmarkCovariances);
     }
 
     ~VioNode() {
@@ -58,8 +73,20 @@ private:
         gravity = this->declare_parameter<std::vector<double>>("gravity", gravity);
         for (size_t i = 0; i < 3; ++i) config->gravity(i, 0) = gravity.at(i);
 
-        config->imuWait = this->declare_parameter<int>("imuWait", 300);
+        config->imuWait = this->declare_parameter<int>("imuWait", 1020);
         config->featWait = this->declare_parameter<int>("featWait", 0);
+        config->initWindow = this->declare_parameter<int>("initWindow", 6);
+
+        config->k1 = this->declare_parameter<double>("k1", 0.0);
+        config->k2 = this->declare_parameter<double>("k2", 0.0);
+        config->p1 = this->declare_parameter<double>("p1", 0.0);
+        config->p2 = this->declare_parameter<double>("p2", 0.0);
+        config->fx = this->declare_parameter<double>("fx", 1.0);
+        config->fy = this->declare_parameter<double>("fy", 1.0);
+        config->cx = this->declare_parameter<double>("cx", 0.0);
+        config->cy = this->declare_parameter<double>("cy", 0.0);
+        config->s = this->declare_parameter<double>("s", 0.0);
+        RCLCPP_INFO(this->get_logger(), "Loaded camera calibration parameters: (k1, k2, p1, p2) -> (%f, %f, %f, %f) & (fx, fy, s, cx, cy) -> (%f, %f, %f, %f, %f)", config->k1, config->k2, config->p1, config->p2, config->fx, config->fy, config->s, config->cx, config->cy);
 
         std::vector<double> R_C0toI = {1, 0, 0, 0, 1, 0, 0, 0, 1};
         R_C0toI = this->declare_parameter<std::vector<double>>("R_C0toI", R_C0toI);
@@ -90,7 +117,9 @@ private:
         for (size_t i = 0; i < 3; ++i) config->prior_bg(i) = prior_bg.at(i);
 
         config->sigma_camera = this->declare_parameter<double>("sigma_camera", 1.0/484.1316);
+        // config->sigma_camera = this->declare_parameter<double>("sigma_camera", 0.306555403/484.1316);
         config->sigma_camera_sq = std::pow(config->sigma_camera, 2);
+        RCLCPP_INFO(this->get_logger(), "sigma_camera: %f", config->sigma_camera);
 
         config->sigma_a = this->declare_parameter<double>("accelerometer_noise_density", 0.01);
         config->sigma_a_sq = std::pow(config->sigma_a, 2);
@@ -104,7 +133,7 @@ private:
         config->sigma_prior_rotation    = this->declare_parameter<double>("sigma_prior_rotation",    1.0e-4);
         config->sigma_prior_translation = this->declare_parameter<double>("sigma_prior_translation", 1.0e-4);
         config->sigma_velocity          = this->declare_parameter<double>("sigma_velocity",          1.0e-4);
-        config->sigma_bias              = this->declare_parameter<double>("sigma_bias",              1.0e-4);
+        config->sigma_bias              = this->declare_parameter<double>("sigma_bias",              1.0e-2);
         config->sigma_pose_rotation     = this->declare_parameter<double>("sigma_pose_rotation",     1.0e-4);
         config->sigma_pose_translation  = this->declare_parameter<double>("sigma_pose_translation",  1.0e-4);
 
@@ -149,10 +178,11 @@ private:
 
     void handle_measurement_uv(const sensor_msgs::msg::PointCloud::ConstSharedPtr msg) {
         if (graphsolver->is_initialized() && skip != config->featWait) {
-            skip++;
-            return;
-        } else
+           skip++;
+           return;
+        } else {
             skip = 0;
+		}
 
         std::vector<uint> leftids;
         std::vector<Eigen::Vector2d> leftuv;
@@ -166,7 +196,6 @@ private:
             leftuv.push_back(uv);
         }
 
-        RCLCPP_INFO(this->get_logger(), "Adding '%zu' features for frame.", leftuv.size());
         double timestamp = rclcpp::Time(msg->header.stamp).seconds();
         graphsolver->addmeasurement_uv(timestamp, leftids, leftuv, this->get_logger());
         optimize_graph(timestamp);
@@ -175,14 +204,20 @@ private:
     void optimize_graph(double timestamp) {
         graphsolver->optimize(this->get_logger());
 
+        // TODO: Visualize published state in rviz
         gtsam::State state = graphsolver->get_current_state();
         publish_state(timestamp, state);
         std::vector<std::pair<double, gtsam::State>> trajectory = graphsolver->get_trajectory(this->get_logger());
         if (!trajectory.empty()) {
-            const auto& p = trajectory.back().second.p();
-            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                "[VIO] t=%.1fs  states=%zu  pos=(%.2f, %.2f, %.2f)",
-                timestamp, trajectory.size(), p(0), p(1), p(2));
+            const auto& p = trajectory.back().second.p();  // translation of pose
+			const auto& v = trajectory.back().second.v();
+			const auto& ba = trajectory.back().second.ba();
+			const auto& bg = trajectory.back().second.bg();
+            RCLCPP_INFO(this->get_logger(), "[VIO] t=%.1fs  states=%zu  pos=(%.2f, %.2f, %.2f)   vel=(%.2f, %.2f, %.2f)   ba=(%.2f, %.2f, %.2f)   bg=(%.2f, %.2f, %.2f)",
+                timestamp, trajectory.size(), p(0), p(1), p(2), v(0), v(1), v(2), ba(0), ba(1), ba(2), bg(0), bg(1), bg(2));
+            // RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+            //     "[VIO] t=%.1fs  states=%zu  pos=(%.2f, %.2f, %.2f)   vel=(%.2f, %.2f, %.2f)   ba=(%.2f, %.2f, %.2f)   bg=(%.2f, %.2f, %.2f)",
+            //     timestamp, trajectory.size(), p(0), p(1), p(2), v(0), v(1), v(2), ba(0), ba(1), ba(2), bg(0), bg(1), bg(2));
         }
         publish_trajectory(timestamp, trajectory);
         publish_cloud(timestamp);
@@ -204,6 +239,28 @@ private:
         if (trajectory.empty())
             return;
 
+        // Write a plain space-separated file: one state per line, no metadata.
+        // Columns: timestamp px py pz qw qx qy qz vx vy vz bax bay baz bgx bgy bgz
+        std::ostringstream oss;
+        oss << config->output_path << "/trajectories/trajectory_"
+            << std::fixed << std::setprecision(3) << timestamp << ".txt";
+        std::ofstream ofs(oss.str());
+        ofs << "timestamp px py pz qw qx qy qz vx vy vz bax bay baz bgx bgy bgz\n";
+        ofs << std::fixed << std::setprecision(9);
+        for (auto& [t, state] : trajectory) {
+            auto p  = state.p();
+            auto q  = state.q();
+            auto v  = state.v();
+            auto ba = state.ba();
+            auto bg = state.bg();
+            ofs << t      << " "
+                << p(0)   << " " << p(1)  << " " << p(2)  << " "
+                << q.w()  << " " << q.x() << " " << q.y() << " " << q.z() << " "
+                << v(0)   << " " << v(1)  << " " << v(2)  << " "
+                << ba(0)  << " " << ba(1) << " " << ba(2) << " "
+                << bg(0)  << " " << bg(1) << " " << bg(2) << "\n";
+        }
+
         std::vector<geometry_msgs::msg::PoseStamped> traj_est;
         for (auto it = trajectory.begin(); it != trajectory.end(); ++it) {
             geometry_msgs::msg::PoseStamped poseStamped;
@@ -218,6 +275,13 @@ private:
         patharr.header.stamp = rclcpp::Time(static_cast<int64_t>(timestamp * 1e9));
         patharr.poses = traj_est;
         pubPathIMU->publish(patharr);
+
+        // // Serialize trajectories (boost text archive — not Python-friendly; replaced by plain-text writer above)
+        // std::ostringstream oss;
+        // oss << config->output_path << "/trajectories/trajectory_" << std::fixed << std::setprecision(3) << timestamp << ".txt";
+        // std::ofstream ofs(oss.str());
+        // boost::archive::text_oarchive oa(ofs);
+        // oa << trajectory;
     }
 
     void publish_cloud(double timestamp) {

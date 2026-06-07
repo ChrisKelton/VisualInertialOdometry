@@ -4,14 +4,16 @@ bool GraphSolver::set_imu_preintegration(const gtsam::State& prior_state, const 
 
   RCLCPP_INFO(logger, "Creating GTSAM preintegration");
   // Create GTSAM preintegration parameters for use with Foster's version
-  auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity(2));  // Z-up navigation frame: gravity points along negative Z-axis !!!
+  // auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity(2));  // Z-up navigation frame: gravity points along negative Z-axis !!!
+  auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(config->gravity.norm());  // Z-up navigation frame: gravity points along negative Z-axis !!!
+  params->n_gravity = config->gravity;  // full 3D gravity vector - not necessarily along Z
   RCLCPP_INFO(logger, "[set_imu_preintegration]: Created parameters.");
 
   params->setAccelerometerCovariance(gtsam::I_3x3 * config->sigma_a_sq);  // acc white noise in continuous
   params->setGyroscopeCovariance(gtsam::I_3x3 * config->sigma_g_sq);  // gyro white noise in continuous
   params->biasAccCovariance = config->sigma_wa_sq * gtsam::Matrix33::Identity(3,3);  // acc bias in continuous
   params->biasOmegaCovariance = config->sigma_wg_sq * gtsam::Matrix33::Identity(3,3);  // gyro bias in continuous
-  params->setIntegrationCovariance(gtsam::I_3x3 * 0.1);  // error committed in integrating position from velocities
+  params->setIntegrationCovariance(gtsam::I_3x3 * std::pow(1e-6, 2));  // error committed in integrating position from velocities
   params->biasAccOmegaInt = 1e-5*gtsam::Matrix66::Identity(6,6); // error in the bias used for preintegration
   RCLCPP_INFO(logger, "[set_imu_preintegration]: Filled in parameters.");
 
@@ -112,7 +114,8 @@ gtsam::State GraphSolver::get_predicted_state(gtsam::Values& values_initial) {
 }
 
 void GraphSolver::reset_imu_integration() {
-  
+
+    // TODO: Check if bias is drifting too much during optimization and whatnot
   // Use the optimized bias to reset integration
   if (preint_gtsam && values_initial.exists(B(ct_state)))
     preint_gtsam->resetIntegrationAndSetBias(values_initial.at<gtsam::Bias>(B(ct_state)));

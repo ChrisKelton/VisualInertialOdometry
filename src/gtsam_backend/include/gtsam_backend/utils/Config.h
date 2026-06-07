@@ -7,6 +7,8 @@ public:
   /// Default constructor
   Config(){}
 
+  std::string output_path = "/home/ckelton/vio/output";
+
   std::string fixedId;
 
   /// Assumed "true" global gravity
@@ -15,6 +17,11 @@ public:
   /// Amount of IMU and FEAT we should wait to initialize to
   int imuWait;
   int featWait;
+  int initWindow;
+
+  /// Intrisic parameters from camera calibration
+  double k1, k2, p1, p2;  // distortion parameters
+  double fx, fy, s, cx, cy;  // projection parameters
 
   /// Relative transform between CAM0 and IMU
   Eigen::Matrix<double,3,1, Eigen::DontAlign> p_IinC0;  // translation from camera origin to IMU origin

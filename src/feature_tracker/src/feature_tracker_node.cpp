@@ -76,7 +76,7 @@ void img_callback(const sensor_msgs::msg::Image::ConstSharedPtr img_msg)
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         if (i != 1 || !STEREO_TRACK)
-            trackerData[i].readImage(tracked_img.rowRange(ROW * i, ROW * (i + 1)), stamp_sec);
+            trackerData[i].readImage(tracked_img.rowRange(ROW * i, ROW * (i + 1)), stamp_sec, g_node->get_logger());
         else
         {
             if (EQUALIZE)

@@ -6,6 +6,8 @@
 #include <execinfo.h>
 #include <csignal>
 
+#include <rclcpp/rclcpp.hpp>
+
 #include <opencv2/opencv.hpp>
 
 #include <opencv2/highgui.hpp>
@@ -33,7 +35,7 @@ class FeatureTracker
   public:
     FeatureTracker();
 
-    void readImage(const cv::Mat &_img,double _cur_time);
+    void readImage(const cv::Mat &_img,double _cur_time, const rclcpp::Logger& logger);
 
     void setMask();
 
@@ -45,7 +47,7 @@ class FeatureTracker
 
     void showUndistortion(const string &name);
 
-    void rejectWithF();
+    void rejectWithF(const rclcpp::Logger &logger);
 
     void undistortedPoints();
 

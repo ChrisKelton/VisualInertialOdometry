@@ -40,6 +40,7 @@ def generate_launch_description():
         # the preload is no longer required and was causing heap corruption on startup.
         additional_env={},
         remappings=[
+            # (new topic name, original topic name),
             ('/vio/data_imu', '/visensor/imu'),
             ('/vio/data_uv',  '/feature_tracker/feature'),
             # ('/visensor/imu', '/vio/data_imu'),
@@ -47,9 +48,23 @@ def generate_launch_description():
         ],
         parameters=[{
             'fixedId':  'world',
-            'gravity':  [0.0, 0.0, 9.81007],
-            'imuWait':  1096,
-            'featWait': 5,
+            # 'gravity':  [0.0, 0.0, 9.81007],
+            'gravity': [0.0, 9.81007, 0.0],
+            # 'imuWait':  1096,
+            'imuWait': 1020,  # aligns with where gt_events starts
+            # 'featWait': 5,
+            'featWait': 2,
+            'initWindow': 6,
+
+            'k1': -0.2886519243,
+            'k2': 0.08251010503,
+            'p1': -0.0003745841,
+            'p2': -9.908178225e-05,
+            'fx': 465.66479689,
+            'fy': 465.53104947,
+            'cx': 373.17652925,
+            'cy': 232.29333312,
+            's': 0.0,
 
             'R_C0toI': [
                  0.9999717314190615,   -0.007438121416209933,  0.001100323844221122,
@@ -68,12 +83,16 @@ def generate_launch_description():
             'prior_pIinG': [-0.187971, 0.214207, 1.098604],
             'prior_vIinG': [-0.376705, 0.408789, 2.792471],
             'prior_ba':    [0.0, 0.0, 0.0],
-            'prior_bg':    [0.0, 0.0, 0.0],
+            # Gyro bias seeded from observed post-convergence values (~0.065, -0.019, 0.028 rad/s).
+            # Without this, dead-reckoning over the 6-frame init window drifts ~3 deg, producing
+            # 83-sigma SmartFactor residuals that LM cannot reduce in a bounded number of iterations.
+            'prior_bg':    [0.065, -0.019, 0.028],
 
-            'sigma_camera':                0.306555403,
+            'sigma_camera':                0.306555403/484.1316,
             'accelerometer_noise_density': 0.08,
             'gyroscope_noise_density':     0.004,
             'accelerometer_random_walk':   0.00004,
+            # 'accelerometer_random_walk':   0.00004 * 100,
             'gyroscope_random_walk':       2.0e-6,
 
             'sigma_prior_rotation':    0.1,

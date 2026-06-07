@@ -33,6 +33,8 @@ from sensor_msgs.msg import Image, Imu
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 from builtin_interfaces.msg import Time as RosTime
+import matplotlib.pyplot as plt
+from pathlib import Path as PPath
 
 DATA_PATH = '/home/ckelton/data/MVSEC/outdoor_day/outdoor_day1_data.hdf5'
 GT_PATH   = '/home/ckelton/data/MVSEC/outdoor_day/outdoor_day1_gt.hdf5'
@@ -75,6 +77,35 @@ def rot_to_quat(R: np.ndarray) -> np.ndarray:
     #     z = 0.25 * s
     # return np.array([x, y, z, w])
 
+
+def plot_imu_data(imu_data: np.ndarray, imu_ts: np.ndarray, output_dir: PPath):
+    output_dir.mkdir(exist_ok=True, parents=True)
+    df = pd.DataFrame(data=np.column_stack([imu_ts, imu_data]),
+                      columns=["ts", "Accel X", "Accel Y", "Accel Z", "Gyro X", "Gyro Y", "Gyro Z"],
+                      index=np.arange(0, len(imu_ts)))
+    ts = df["ts"] - df["ts"][0]
+    colors = ['r', 'g', 'b']
+    ylabel_units = ["[m/s^2]", "[rad/s]"]
+    output_names = ["acceleration.png", "gyrometer.png"]
+    for col_idx, column_name_group in enumerate(zip(*[iter(df.columns[1:])]*3)):
+        fig, axs = plt.subplots(nrows=3, ncols=1, figsize=(8, 10), sharex=True)
+        units = ylabel_units[col_idx]
+        min_ = 1e12
+        max_ = 0.0
+        stds_ = []
+        for column_name in column_name_group:
+            min_ = min(np.min(df[column_name]), min_)
+            max_ = max(np.max(df[column_name]), max_)
+            stds_.append(np.std(df[column_name]))
+        for idx, column_name in enumerate(column_name_group):
+            axs[idx].plot(ts, df[column_name], colors[idx])
+            axs[idx].set_title(column_name)
+            axs[idx].set_ylabel(f"{column_name} {units}")
+            axs[idx].set_ylim(min_ - np.mean(stds_), max_ + np.mean(stds_))
+        axs[-1].set_xlabel("Time (s)")
+        plt.tight_layout()
+        fig.savefig(str(output_dir / output_names[col_idx]))
+        plt.close()
 
 class MvsecPublisher(Node):
     def __init__(self, data_path: str, gt_path: str, speed: float = 1.0):
@@ -164,8 +195,10 @@ class MvsecPublisher(Node):
             stamp = to_ros_time(ts)
             if kind == 'imu':
                 self._pub_imu(i, stamp)
+                # pass
             elif kind == 'img':
                 self._pub_img(i, stamp)
+                # pass
             else:
                 self._pub_gt(i, stamp)
 
